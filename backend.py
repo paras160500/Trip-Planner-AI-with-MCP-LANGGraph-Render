@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 import certifi
+import asyncio
 
 os.environ['SSL_CERT_FILE'] = certifi.where()
 os.environ['REQUEST_CA_BUNDLE'] = certifi.where()
@@ -18,8 +19,9 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from langchain_core.messages import HumanMessage,AIMessage,SystemMessage,AnyMessage
 
 from langchain_groq import ChatGroq
-from tools.tavily_tool import tavily_search
-from tools.flight_tool import search_flights
+# from tools.tavily_tool import tavily_search
+# from tools.flight_tool import search_flights
+from mcp_client import tavily_mcp_search , aviation_mcp_call
 
 # -----------------------------------------------------------------------------------
 #                                   Init Statements
@@ -63,21 +65,76 @@ class TravelState(TypedDict):
     llm_calls : int 
 
 # ────────────────────────Flight Agent──────────────────────── 
+
+FLIGHT_AGENT_PROMPT = """
+    You are a travel flight expert.
+
+    User Query:
+    {query}
+
+    Airport Information:
+    {airport_data}
+
+    Airline Information:
+    {airline_data}
+
+    Generate:
+    
+    1. Likely departure airport 
+    2. Likely arrival airport 
+    3. Airlines serving this route
+    4. Typical flight duration
+    5. Estimated airfare range
+    6. Peak season pricing warning
+    7. Booking Advice
+
+    Return concise travel guidance.
+    """
+
 def flight_agent(state : TravelState):
     """
         Getting all the flight information for the trip
         it will call the search_flights function
     """
+    print("\nINSIDE FLIGHT AGENT---\n")
     query = state['user_query']
-    flight_data = search_flights(query)
+
+    try:
+        airports = asyncio.run(
+            aviation_mcp_call("list_airports")
+        )
+
+        airlines = asyncio.run(
+            aviation_mcp_call("list_airlines")
+        )
+
+        print("\nAIRPORTS :- " , airports)
+        print("\nAIRLINES :- " , airlines)
+
+        prompt = FLIGHT_AGENT_PROMPT.format(query=query , airport_data = str(airports)[:3000] , airline_data = str(airlines)[:3000])
+
+        response = llm.invoke([
+            SystemMessage(content="You are an expert travel flight planner."),
+            HumanMessage(content = prompt)
+        ])
+
+        flight_data = response.content 
+
+    except Exception as e:
+        flight_data = f"Flight information unavailable : {str(e)}"
 
     return {
         "flight_results" : flight_data,
         "messages" : [
-            AIMessage(content="Flight results fetched.")
+            AIMessage(content="Flight recommendations generated")
         ],
         "llm_calls" : state.get("llm_calls" , 0) + 1 
     }
+
+    
+
+
+
 
 # ────────────────────Hotel Agent────────────────────
 def hotel_agent(state : TravelState):
@@ -86,7 +143,7 @@ def hotel_agent(state : TravelState):
         it will call teh tavily_search function
     """
     query = f"Best hotels for {state['user_query']}"
-    hotel_results = tavily_search(query)
+    hotel_results = asyncio.run(tavily_mcp_search(query))
 
     return {
         "hotel_results" : hotel_results,
@@ -135,34 +192,159 @@ def final_agent(state : TravelState):
     
     """
     final_prompt = f"""
-    Generate the final travel response for the user.
+    You are an expert AI Travel Planner.
 
-    User Request:
-    {state['user_query']}
+    Create a visually attractive travel plan using GitHub Markdown.
 
-    Flights:
-    {state['flight_results']}
+    USER REQUEST
+    -------------
+    {state["user_query"]}
 
-    Hotels:
-    {state['hotel_results']}
+    FLIGHT RESULTS
+    --------------
+    {state["flight_results"]}
 
-    Itinerary:
-    {state['itinerary']}
+    HOTEL RESULTS
+    -------------
+    {state["hotel_results"]}
 
-    Format the final answer beautifully using these sections:
+    ITINERARY
+    ---------
+    {state["itinerary"]}
 
-    1. Trip Summary
-    2. Flight Information
-    3. Hotel Suggestions
-    4. Day by Dat Itinerary
-    5. Estimated Budget
-    6. Final Recommendations
+    IMPORTANT FORMATTING RULES
 
-    Important:
-    - Be clear and practical.
-    - Mention that live flight API may not provide tickets prices if pricing is unavailable
-    - Keep the response useful for real travel planning.
-    """
+    Use emojis in every section.
+
+    Use proper Markdown headings (#, ##, ###).
+
+    Use tables wherever appropriate.
+
+    Use bullet points instead of long paragraphs.
+
+    Use horizontal dividers (---) between sections.
+
+    Highlight important information using **bold**.
+
+    Use blockquotes (>) for travel tips.
+
+    Use checklists where useful.
+
+    Keep everything easy to scan.
+
+    Never output one huge paragraph.
+
+    The response should look like a premium travel website.
+
+    Follow this structure exactly:
+
+    # 🌍 Trip Summary
+
+    - Destination
+    - Duration
+    - Best Time
+    - Travel Style
+    - Quick Overview
+
+    ---
+
+    # ✈️ Flight Information
+
+    Create a table.
+
+    | Airline | Route | Duration | Stops | Price |
+    |---------|--------|----------|-------|-------|
+
+    If price is unavailable write:
+
+    "Live flight pricing is currently unavailable."
+
+    ---
+
+    # 🏨 Recommended Hotels
+
+    Create a table.
+
+    | Hotel | City | Price/Night | Rating | Why Stay Here |
+    |--------|------|-------------|---------|---------------|
+
+    ---
+
+    # 📅 Day-by-Day Itinerary
+
+    For every day use this format:
+
+    ## Day 1️⃣
+
+    Morning ☀️
+
+    Afternoon 🌇
+
+    Evening 🌃
+
+    Food 🍽️
+
+    Transport 🚕
+
+    Budget 💰
+
+    Repeat for every day.
+
+    ---
+
+    # 💸 Estimated Budget
+
+    Create a table.
+
+    | Category | Estimated Cost |
+    |----------|----------------|
+
+    Include
+
+    - Flights
+    - Hotels
+    - Food
+    - Transport
+    - Attractions
+    - Shopping
+    - Total
+
+    ---
+
+    # 🎒 Packing Checklist
+
+    Use markdown checkboxes.
+
+    Example
+
+    - [ ] Passport
+    - [ ] Visa
+    - [ ] Charger
+
+    ---
+
+    # 💡 Travel Tips
+
+    Give 5-10 useful tips.
+
+    Use emojis.
+
+    ---
+
+    # ⚠️ Important Notes
+
+    Mention:
+
+    - Flight prices may be unavailable from live APIs.
+    - Verify visa requirements.
+    - Check weather before departure.
+
+    ---
+
+    # ❤️ Final Recommendation
+
+    Finish with an encouraging closing message.
+"""
 
     response = llm.invoke([
         SystemMessage(content = "You are a professional AI Travel booking assistant."),
