@@ -24,17 +24,19 @@ client = MultiServerMCPClient(
             "url" : f"https://mcp.tavily.com/mcp/?tavilyApiKey={TAVILY_API_KEY}"
         },
         "aviationstack": {
-            "transport": "stdio",
-            "command": "uv",
-            "args": [
-                "tool",
-                "run",
-                "aviationstack-mcp"
-            ],
-            "env": {
-                "AVIATION_STACK_API_KEY": AVIATION_STACK_API_KEY
-            }
-        },  
+        "transport": "stdio",
+        "command": "uv",
+        "args": [
+            "tool",
+            "run",
+            "--with",
+            "mcp==1.28.1",
+            "aviationstack-mcp"
+        ],
+        "env": {
+            "AVIATION_STACK_API_KEY": AVIATION_STACK_API_KEY
+        }
+    },
     }
 )
 
