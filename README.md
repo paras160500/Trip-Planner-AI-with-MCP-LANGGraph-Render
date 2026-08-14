@@ -18,7 +18,7 @@
 
 </div>
 
-
+![Architecture Diagram](diagramSample.png)
 
 ---
 
